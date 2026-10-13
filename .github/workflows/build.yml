@@ -1,12 +1,8 @@
 name: Build rootfs
 
 on:
-  workflow_call:
-    outputs:
-      matrix:
-        description: Device configurations built by this workflow
-        value: ${{ jobs.once.outputs.matrix }}
-
+  workflow_dispatch:
+   
 permissions:
   contents: read
 
