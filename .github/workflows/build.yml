@@ -1,0 +1,121 @@
+name: Build rootfs
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: Device configurations built by this workflow
+        value: ${{ jobs.once.outputs.matrix }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rootfs-build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Generate matrix
+    outputs:
+      matrix: ${{ steps.gen-matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install matrix generator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3-yaml
+
+      - name: Generate matrix
+        id: gen-matrix
+        run: |
+          JOBS="$(./generate_device_recipe.py --matrix)"
+          echo "matrix=${JOBS}" >> "$GITHUB_OUTPUT"
+
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    needs: once
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJson(needs.once.outputs.matrix) }}
+
+    name: ${{ matrix.config.job_name }}
+    env:
+      BUILDER_IMAGE: quay.io/droidian/rootfs-builder:next-arm64
+      PRODUCT: ${{ matrix.config.product }}
+      ARCH: ${{ matrix.config.arch }}
+      EDITION: ${{ matrix.config.edition }}
+      VARIANT: ${{ matrix.config.variant }}
+      APILEVEL: ${{ matrix.config.apilevel }}
+      DROIDIAN_VARIANT: ${{ matrix.config.droidian_variant }}
+      DROIDIAN_IDENTIFIER: ${{ matrix.config.product }}-${{ matrix.config.arch }}-${{ matrix.config.edition }}-${{ matrix.config.variant }}-${{ matrix.config.apilevel }}
+
+    steps:
+      - name: Set nightly version
+        if: startsWith(github.ref, 'refs/tags/droidian') != true
+        run: echo "DROIDIAN_VERSION=101" >> "$GITHUB_ENV"
+
+      - name: Set version
+        if: startsWith(github.ref, 'refs/tags/droidian') == true
+        run: echo "DROIDIAN_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: 'true'
+          submodules: 'recursive'
+
+      - name: Create build dir
+        run: mkdir -p out
+
+      - name: Pull container
+        run: docker pull "$BUILDER_IMAGE"
+
+      - name: Start Container
+        run: |
+          CONTAINER_HASH=$(docker run --detach --privileged --cgroupns=host \
+            -v /dev:/host-dev \
+            -v /sys/fs/cgroup:/sys/fs/cgroup \
+            -v "$GITHUB_WORKSPACE:/buildd/sources" \
+            --security-opt seccomp:unconfined "$BUILDER_IMAGE" sleep infinity)
+          echo "CONTAINER_HASH=$CONTAINER_HASH" >> "$GITHUB_ENV"
+
+      - name: Build rootfs
+        shell: bash
+        run: |
+          docker exec --env DROIDIAN_VERSION "$CONTAINER_HASH" /bin/sh -ec '
+            cd /buildd/sources
+            ./generate_device_recipe.py "$@"
+            debos --disable-fakemachine generated/droidian.yaml
+          ' sh "$PRODUCT" "$ARCH" "$EDITION" "$VARIANT" "$APILEVEL" "$DROIDIAN_VARIANT" \
+            2>&1 | tee "$RUNNER_TEMP/rootfs-build.log"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ env.DROIDIAN_IDENTIFIER }}
+          path: ${{ runner.temp }}/rootfs-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Clean up container
+        if: always() && env.CONTAINER_HASH != ''
+        run: docker rm --force "$CONTAINER_HASH"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidian-out-${{ env.DROIDIAN_IDENTIFIER }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
