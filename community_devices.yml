@@ -10,6 +10,6 @@ samsung_s20fe:
   arch: arm64
   edition: [phosh, plamo_wf_experimental]
   variant: phone
-  apilevel: 33
+  apilevel: 30
 
   packages: *samsung_s20fe_packages
