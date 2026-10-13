@@ -89,6 +89,7 @@ jobs:
           echo "CONTAINER_HASH=$CONTAINER_HASH" >> "$GITHUB_ENV"
 
       - name: Build rootfs
+        shell: bash
         run: |
           docker exec --env DROIDIAN_VERSION "$CONTAINER_HASH" /bin/sh -ec '
             cd /buildd/sources
