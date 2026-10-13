@@ -5,6 +5,24 @@ Droidian is a GNU/Linux distribution based on top of Mobian, a Debian-based dist
 
 This repository is the canonical place to get Droidian images.
 
+# Building images with GitHub Actions
+
+Branch pushes run the **droidian rootfs test build** workflow. It uses the
+same native ARM64 build pipeline as manual builds, generates the device matrix
+from `community_devices.yml` (or `devices.yml` when no community file exists),
+and uploads images without creating a release.
+
+To build manually, open **Actions → droidian rootfs-builder → Run workflow**
+and select the branch or tag. Uncheck **Publish images to a GitHub release**
+for an artifact-only build; publishing is enabled by default. Published branch
+builds replace the `nightly` prerelease, while `droidian*` tags produce draft
+stable releases.
+
+Download images from the run's `droidian-out-*` artifacts and build logs from
+`build-log-*`. Both are retained for seven days. Builds run independently, so a
+failed edition does not cancel the others; releases are published only when all
+builds succeed. New pushes cancel older push builds for the same branch.
+
 # Which image to get?
 
 There are two different types of images:
